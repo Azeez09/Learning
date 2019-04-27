@@ -1,0 +1,971 @@
+
+public class ApexUtil {
+    public static Boolean isTest = false;
+    
+    public static String trim(String data, Integer size) {
+        if (data == null) return data;
+        if (data.length() <= size) return data;
+        return data.substring(0, size);
+    }
+    
+    public static String concatenate(List<Id> arr, String sep) {
+        String result = '';
+        if (arr == null) return result;
+        Integer i=1;
+        for (String ele : arr) {
+            result += ele;
+            if (i < arr.size()) result += sep;
+            i++;
+        }
+        return result;
+   }   
+   public static Boolean isUserInPermSet(String pUserId, String pPermSetName) {
+        if (pPermSetName == null || pPermSetName.trim() == '')
+            return false;
+        if (pUserId == null) {
+            pUserId = UserInfo.getUserId();
+        }
+        try {
+            List <PermissionSet> permSet = [Select Name, Label, Id 
+                                            From PermissionSet 
+                                                WHERE Name= :pPermSetName 
+                                                AND Id IN (Select p.PermissionSetId 
+                                                            From PermissionSetAssignment p 
+                                                            where p.AssigneeId = :pUserId)];
+            if (permSet != null && permSet.size() > 0) {
+                return true;
+            }
+        } catch(Exception ex) {
+            system.debug(ex);
+        }
+        return false;
+   }
+
+//// canEditField queries permission sets to determine field editability
+//// It is NOT bulkified - purely intended for onesy twosy type of use   
+   public static boolean canEditField(String pObjectName, String pFieldName) {
+        if (pObjectName == null || pFieldName == null)
+            return false;
+        String fullFieldName = pObjectName + '.' + pFieldName;
+        String currentUser = UserInfo.getUserId();
+        
+  //        List<PermissionSetAssignment> psi = [select PermissionSetId
+    //                              FROM PermissionSetAssignment
+   //                               WHERE Assignee.Id =:currentUser];
+   //   system.debug('ApexUtil--------->> psi = ' + psi);
+   //   if (psi == null || psi.size() == 0)
+   //       return false;
+    
+//      List<FieldPermissions> fp = [Select SobjectType, PermissionsEdit, ParentId, Parent.Name, Id, Field 
+//                                      From FieldPermissions f 
+//                                      where SobjectType=:pObjectName and Field = :fullFieldName];
+        List<FieldPermissions> fp = [Select SobjectType, PermissionsRead, PermissionsEdit, 
+                                        ParentId, Parent.Name, Id, Field 
+                                        From FieldPermissions
+                                        where SobjectType=:pObjectName and Field=:fullFieldName and PermissionsEdit=false
+                        //              and ParentId = :psi[0].PermissionSetId];
+                                        and ParentId in (select PermissionSetId
+                                                            FROM PermissionSetAssignment
+                                                            WHERE Assignee.Id = :currentUser )];
+        if (fp != null && fp.size() >= 1) {
+            return fp[0].PermissionsEdit;
+        }
+        return true;                                    
+   }
+   
+   public static string getPricebookName(Opportunity O, string saleschannel)
+   {
+        string pbName;
+        if (O.Pricebook2.Name == null)
+        {
+            if(saleschannel == label.federalsaleschannel){
+                pbName = label.FederalSalesOffering;
+            }
+            else if(saleschannel==label.BMGSalesChannel){
+                pbName = label.BMGSalesOffering;
+            }
+            else if(saleschannel==label.QpartnerSalesChannel){
+                pbName = label.BMGSalesOffering;
+            }
+            else {
+                pbName = label.BMGSalesOffering;
+            }
+        }
+        else
+        {
+            pbName = O.Pricebook2.Name;
+        }
+        return pbName;
+   }
+
+   public static void sendEmail(String[] tos, String[] ccs, String[] bccs, String replyTo, String subject, String body, boolean isHtmlEmail) {
+        System.debug('sending email using Salesforce email service');
+        Messaging.SingleEmailMessage mail = new Messaging.SingleEmailMessage();
+        mail.setToAddresses(tos);
+        if (ccs != null) mail.setCcAddresses(ccs);
+        if (bccs != null) mail.setBccAddresses(bccs);
+        if (replyTo != null) mail.setReplyTo(replyTo);
+        mail.setSubject(subject);
+        mail.setBccSender(false);
+        mail.setUseSignature(false);
+        if (isHtmlEmail) {
+            mail.setHtmlBody(body);
+        }
+        else {
+            mail.setPlainTextBody(body);
+        }
+        
+        if (!isTest) {
+            Messaging.sendEmail(new Messaging.SingleEmailMessage[] { mail });
+        }       
+    }
+    
+   public static void sendEmailWithAttachment(String[] tos, String[] ccs, String[] bccs, String replyTo, String subject, String body, boolean isHtmlEmail, 
+                                                blob attachment, String attachmentFileName) {
+        System.debug('sending email using Salesforce email service');
+        Messaging.SingleEmailMessage mail = new Messaging.SingleEmailMessage();
+        mail.setToAddresses(tos);
+        if (ccs != null) mail.setCcAddresses(ccs);
+        if (bccs != null) mail.setBccAddresses(bccs);
+        if (replyTo != null) mail.setReplyTo(replyTo);
+        mail.setSubject(subject);
+        mail.setBccSender(false);
+        mail.setUseSignature(false);
+        if (isHtmlEmail) {
+            mail.setHtmlBody(body);
+        }
+        else {
+            mail.setPlainTextBody(body);
+        }
+        if (attachment != null) {
+            Messaging.EmailFileAttachment efa = new Messaging.EmailFileAttachment();
+            if (attachmentFileName != null) efa.setFileName(attachmentFileName);
+            else efa.setFileName(attachmentFileName);
+            efa.setBody(attachment);
+            if (!isTest)
+                mail.setFileAttachments(new Messaging.EmailFileAttachment[] {efa});// Sends the email 
+        }
+        
+        if (!isTest) {
+            Messaging.sendEmail(new Messaging.SingleEmailMessage[] { mail });
+        }       
+    }
+    
+    public static void manualShareRead(Id recordId, Id userOrGroupId){
+      DM__Share ds = new DM__Share();
+      ds.UserOrGroupId = userinfo.getUserId();//userOrGroupId;
+      //system.debug('### parentid = ' + recordId);
+      ds.ParentId = recordId;
+      ds.AccessLevel = 'Read';
+      ds.RowCause = Schema.DM__Share.RowCause.created__c;
+      system.debug('### ds ' + ds);
+      if(isTest){
+        return;
+      }
+      Database.SaveResult sr = Database.insert(ds,false);
+      if(sr.isSuccess()){
+         // Indicates success  
+         system.debug('### True');
+         //return true;
+      }
+      else {
+         // Get first save result error.  
+    
+         Database.Error err = sr.getErrors()[0];
+         system.debug('### false ' + err);     
+         // Check if the error is related to trival access level.  
+    
+         // Access levels equal or more permissive than the object's default   
+    
+         // access level are not allowed.   
+    
+         // These sharing records are not required and thus an insert exception is acceptable.   
+    
+         if(err.getStatusCode() == StatusCode.FIELD_FILTER_VALIDATION_EXCEPTION  &&  
+                  err.getMessage().contains('AccessLevel')){
+            // Indicates success.  
+    
+            //return true;
+         }
+         else{
+            // Indicates failure.  
+            system.debug('### faiurue');
+            //return false;
+         }
+
+      }
+    }    
+     
+    public static List<BusinessHours> myBusHrsList {
+          get {
+               if (myBusHrsList == null) {
+                    myBusHrsList = [Select b.WednesdayStartTime, b.WednesdayEndTime, b.TuesdayStartTime, b.TuesdayEndTime, b.TimeZoneSidKey, b.ThursdayStartTime, b.ThursdayEndTime, b.SystemModstamp, b.SundayStartTime, b.SundayEndTime, b.SaturdayStartTime, b.SaturdayEndTime, b.Name, b.MondayStartTime, b.MondayEndTime, b.LastModifiedDate, b.LastModifiedById, b.IsDefault, b.IsActive, b.Id, b.FridayStartTime, b.FridayEndTime, b.CreatedDate, b.CreatedById From BusinessHours b where isDefault=true];
+               }
+               return myBusHrsList;
+          }
+          set;
+    }
+    
+    public static List<Order_Queue__c> myOrderQueueList {
+          get {
+               if (myOrderQueueList == null) {
+                    myOrderQueueList = [select o.Queue_Name__c, o.Id, o.On_Time_Performance__c from Order_Queue__c o];
+               }
+               return myOrderQueueList;
+          }
+          set;
+    }
+    
+    public static List<Holiday> myHolidayList {
+          get {
+               if (myHolidayList == null) {
+                    myHolidayList = [Select h.SystemModstamp, h.StartTimeInMinutes, h.RecurrenceType, h.RecurrenceStartDate, h.RecurrenceMonthOfYear,
+                                        h.RecurrenceInterval, h.RecurrenceInstance, h.RecurrenceEndDateOnly, h.RecurrenceDayOfWeekMask, 
+                                        h.RecurrenceDayOfMonth,h.Name, h.LastModifiedDate, h.LastModifiedById, h.IsRecurrence, h.IsAllDay, 
+                                        h.Id, h.EndTimeInMinutes, h.Description, h.CreatedDate, h.CreatedById, h.ActivityDate 
+                                        From Holiday h ];
+               }
+               return myHolidayList;
+          }
+          set;
+    }
+    
+    public static list<Custom_Picklist__c> getPicklistValue(String name){
+        if(name == null || name.trim().length() == 0) {
+            return null;
+        }
+        list<Custom_Picklist__c> picklistValue = new list<Custom_Picklist__c>();
+        picklistValue = [SELECT Name__c, Key__c, Value__c FROM Custom_Picklist__c WHERE Name__c = :name and IsDeleted = false];
+        return picklistValue;
+    }
+    
+    public static list<SelectOption> getCustomPicklistValue(String name){
+        if(name == null || name.trim().length() == 0) {
+            return null;
+        }
+        list<Custom_Picklist__c> customPickList = new list<Custom_Picklist__c>();
+        list<SelectOption> optionsList = new list<SelectOption>();
+        customPickList = getPicklistValue(name);
+        for(Custom_Picklist__c picklistValue : customPickList){
+            optionsList.add(new SelectOption(picklistValue.Key__c, picklistValue.Value__c));
+        }
+        return optionsList;
+    }
+    
+    public static boolean isPartner() {
+        User currentUser = [select id, CUID__c, FirstName, Lastname, BMG_Sales_Channel__c,
+            profile.name,profile.userlicense.licensedefinitionkey,Sales_Channel_Name__c
+            from User where id = :UserInfo.getUserId()];
+        return isPartner(currentUser);
+    }
+    
+     //US11422
+    public static boolean isFederal() {
+        User currentUser = [select id, profile.name
+            from User where id = :UserInfo.getUserId()];
+        return isFederal(currentUser);
+    }    
+        
+    public static boolean isPartnerChannel() {
+        User currentUser = [select id, CUID__c, FirstName, Lastname, BMG_Sales_Channel__c,
+            profile.name,profile.userlicense.licensedefinitionkey,Sales_Channel_Name__c
+            from User where id = :UserInfo.getUserId()];
+        return currentUser.BMG_Sales_Channel__c == System.Label.Partner_Channel;
+    }
+    
+    /*
+     * Added for US4010
+     */
+    public static boolean isAcquisitionChannel() {
+        User currentUser = [select id, CUID__c, FirstName, Lastname, BMG_Sales_Channel__c,
+            profile.name,profile.userlicense.licensedefinitionkey,Sales_Channel_Name__c
+            from User where id = :UserInfo.getUserId()];
+        return currentUser.BMG_Sales_Channel__c == System.Label.Acquisition_Channel;
+    }
+    
+    public static boolean isPartner(User Usr){
+        
+        boolean userIsPartner = false;
+        
+        String licenseKey = Usr.profile.userlicense.licensedefinitionkey;
+        
+        if(licenseKey.endsWith('PRM') || licenseKey.contains('Partner_Community')){ //US30056 update for Partner Community
+            userIsPartner = true;
+        }
+        
+        return userIsPartner;
+    }
+    
+    //US11422
+     public static boolean isFederal(User user){
+        
+        boolean userIsFederal = false;
+        
+        String profileName = user.Profile.Name;
+        
+        if(profileName!=null && (profileName.toUpperCase().contains('FEDERAL') || profileName == 'GES-Sales Reps')){
+            userIsFederal = true;
+        }
+        
+        return userIsFederal;
+    }    
+    
+    public static boolean canEditAccount(Id acctId) {
+        boolean canEdit = false;
+    
+        try {
+            UserRecordAccess ura = [select RecordId, HasEditAccess from UserRecordAccess where UserId = :UserInfo.getUserId() and RecordId = :acctId];
+             
+            canEdit = ura.HasEditAccess; 
+            
+        } catch(Exception ex) {
+            system.debug(ex);
+        }    
+        
+        /*system.savepoint sp = Database.setSavepoint();
+        
+        try {
+            Account a = [select id from Account where id = :acctId];
+            //a.name = a.name + '!';
+            update a;
+
+            canEdit = true;
+        } catch(Exception ex) {
+            system.debug(ex);
+        }
+        
+        Database.rollback(sp);*/
+
+        
+        return canEdit;
+    }
+    
+    public static boolean canEditContact(Id contactId) {
+        boolean canEdit = false;
+    
+        try {
+            UserRecordAccess ura = [select RecordId, HasEditAccess from UserRecordAccess where UserId = :UserInfo.getUserId() and RecordId = :contactId];
+             
+            canEdit = ura.HasEditAccess; 
+            
+        } catch(Exception ex) {
+            system.debug(ex);
+        }
+        
+        /*system.savepoint sp = Database.setSavepoint();
+        
+        try {
+            Contact c = [select id from Contact where id = :contactId];
+            //c.LastName += '!';
+            update c;
+
+            canEdit = true;
+        } catch(Exception ex) {
+            system.debug(ex);
+        }
+        
+        Database.rollback(sp);*/
+
+        
+        return canEdit;
+    } 
+    
+    public static boolean canEditTask(Id taskid){
+        boolean canEdit = false;
+    
+        try {
+            UserRecordAccess ura = [select RecordId, HasEditAccess from UserRecordAccess where UserId = :UserInfo.getUserId() and RecordId = :taskid];
+             
+            canEdit = ura.HasEditAccess; 
+            
+        } catch(Exception ex) {
+            system.debug(ex);
+        }
+        
+    
+        /*system.savepoint sp = Database.setSavepoint();
+        
+        try {
+            Task__c task = [select id from Task__c where id = :taskid];
+            ////c.LastName += '!';
+            update task;
+            
+
+            canEdit = true;
+        } catch(Exception ex) {
+            system.debug(ex);
+        } 
+        
+        Database.rollback(sp);*/
+
+        
+        return canEdit;
+        
+    }
+    
+    public static boolean canEditLead(Id leadId) {
+        boolean canEdit = false;
+    
+        try {
+            UserRecordAccess ura = [select RecordId, HasEditAccess from UserRecordAccess where UserId = :UserInfo.getUserId() and RecordId = :leadId];
+             
+            canEdit = ura.HasEditAccess; 
+            
+        } catch(Exception ex) {
+            system.debug(ex);
+        }
+        
+        /*system.savepoint sp = Database.setSavepoint();
+        
+        try {
+            Lead l = [select id from Lead where id = :leadId];
+            //l.LastName += '!';
+            update l;
+
+            canEdit = true;
+        } catch(Exception ex) {
+            system.debug(ex);
+        }
+        
+        Database.rollback(sp);*/
+
+        
+        return canEdit;
+    }               
+    public static boolean allowChangeProducts(opportunity o) {       
+        boolean allowed = !(o.Credit_Status__c == 'Submitted' || 
+                    o.Credit_Status__c == 'Denied' ||
+                    o.Credit_Status__c == 'Security Deposit Required' ||
+                    o.Credit_Status__c == 'Approved' ||
+                    o.Credit_Status__c == 'Manual Review' ||
+                    o.StageName == 'Agreement' ||
+                    o.StageName == 'Closed Won' ||
+                    o.StageName == 'Closed Lost' ||
+                    o.StageName == 'Won - RMG' ||
+                    o.StageName == 'Lost - RMG' ||
+                    o.StageName == 'Cancelled - RMG' ||
+                    o.Pending_CIEs__c > 0 ||
+                    ((o.Type == '' || o.Type == null || o.Type == 'New Customer' || o.Type == 'Existing Customer') && 
+                     (/*o.Sub_Type__c == '' || o.Sub_Type__c == null ||  allow null sub-type for rmg-lq oppty types*/o.Sub_Type__c == 'Legacy Qcentral Data')));
+        system.debug('### allowChangeProducts(' + o.Id + ') = ' + allowed);
+        return allowed;
+    } 
+    
+
+    public static List <CNDC_Assignments__c> returnCNDCAssignments(OpportunityLineItem OLI)
+    {
+        return [SELECT Id, Non_Standard_Pricing_Lookup__c, CNDC_Lookup__c, OpptyLineItemExternalId__c, Prod_CNDC_NSP_ID__c FROM CNDC_Assignments__c
+                WHERE OpptyLineItemExternalId__c = :OLI.id ];
+            
+    }
+    
+    public static List<DM__c> returnNSP(CNDC_Assignments__c CNDCAssign)
+    {
+        return [SELECT Id, nsp_status__c, Name, DM_opportunity_id__c FROM DM__c
+                    WHERE Id = :CNDCAssign.Non_Standard_Pricing_Lookup__c and DM_opportunity_id__c = :CNDCAssign.Prod_CNDC_NSP_ID__c ];
+    }
+    
+    public static boolean allowChangeNSP(DM__c NSP)
+    {
+        return !(NSP.nsp_status__c == 'Contract Signed' ||
+                   NSP.nsp_status__c == 'Cancelled' ||
+                   NSP.nsp_status__c == 'Lost');
+    }
+
+    public static boolean allowChangeProducts(ID oppId) {       
+        boolean allowed;
+        opportunity o = [select Credit_Status__c, StageName, Pending_CIEs__c, Type, Sub_Type__c 
+                         from Opportunity where id = :oppId];
+        return allowChangeProducts(o);
+    }
+    
+    public static List<RecordType> recordTypeList = null;
+    
+    public static List<RecordType> getAllRecordType(){
+            if(recordTypeList == null){
+                recordTypeList = [Select Id, Name, DeveloperName, SobjectType from RecordType where IsActive = true];
+            }
+            return recordTypeList;
+    }
+    
+    public static Map<Id, String> idToRecordTypeNameMap = null;
+    public static Map<String, Id> recordTypeNameToIdMap = null;
+    
+    public static Map<Id, String> getIdToRecordTypeNameMap(){
+        if(idToRecordTypeNameMap == null){
+            idToRecordTypeNameMap = new Map<Id, String>();
+            List<RecordType> recordTypeColl = ApexUtil.getAllRecordType();
+            for(RecordType rt: recordTypeColl){
+                idToRecordTypeNameMap.put(rt.Id, rt.Name);
+            }   
+        }           
+        return idToRecordTypeNameMap;
+    }
+    
+    public static String getRecordTypeNameById(Id recordTypeId){        
+        if(idToRecordTypeNameMap == null){
+            getIdToRecordTypeNameMap();
+        }
+        return idToRecordTypeNameMap.get(recordTypeId);
+    }
+    
+    public static Map<String, Id> getRecordTypeNameToIdMap(){
+        if(recordTypeNameToIdMap == null){
+            recordTypeNameToIdMap = new Map<String, Id>();
+            List<RecordType> recordTypeColl = ApexUtil.getAllRecordType();
+            for(RecordType rt: recordTypeColl){
+                recordTypeNameToIdMap.put(getRecordTypeMapKey(rt.sObjectType, rt.Name), rt.Id);
+            }   
+        }           
+        return recordTypeNameToIdMap;
+    }
+    
+    private static String getRecordTypeMapKey(String sObjectType, String recordTypeName) {
+        return sObjectType + '.' + recordTypeName;
+    }
+    
+    public static Id getRecordTypeIdByName(String sObjectType, String recordTypeName){      
+        if(recordTypeNameToIdMap == null){
+            getRecordTypeNameToIdMap();
+        }
+        return recordTypeNameToIdMap.get(getRecordTypeMapKey(sObjectType, recordTypeName));
+    }
+    
+    public static List<String> getBmgSalesChannels() {
+        List<String> myList = new List<String>();
+        Schema.DescribeFieldResult fr = Schema.sObjectType.User.fields.BMG_Sales_Channel__c;
+        List<Schema.PicklistEntry> pes = fr.getPicklistValues();
+
+        for (Schema.PicklistEntry pe : pes) {
+            if (pe.isActive()) {
+                myList.add(pe.getValue());
+            }
+        }
+        
+        return myList;
+    }
+    /////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    public boolean isValidStandardPhone(String pPhoneNumber){   
+        boolean bIsValid = false;
+    
+        if (pPhoneNumber!=null){
+            String strExpression = '^\\(?(\\d{3})\\)?[- ]?(\\d{3})[- ]?(\\d{4})$';   
+            Pattern phonePattern = Pattern.compile(strExpression);   
+            Matcher matcher = phonePattern.matcher(pPhoneNumber);   
+            if(matcher.matches()){   
+                bIsValid = true;
+            }
+        }
+        
+        return bIsValid;
+    }  
+    /////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    public static String removeSpecialCharacters(String pString){   
+        
+        pString = pString.replaceAll('[\\r\\n]', '');
+        return pString;
+            
+    }  
+    /////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    
+    /*
+    if((trigger.isInsert && iuOrder.Order_Number__c != null && iuOrder.Billing_Account_Number__c != null) || 
+                (trigger.isUpdate &&
+                ((Trigger.oldMap.get(iuOrder.Id).Order_Number__c != Trigger.newMap.get(iuOrder.Id).Order_Number__c)||
+                 (Trigger.oldMap.get(iuOrder.Id).Billing_Account_Number__c != Trigger.newMap.get(iuOrder.Id).Billing_Account_Number__c))))
+            {
+    */
+    public static Boolean orderOrBillingNumberValidationNeeded(Boolean isInsert, String newValue, String oldValue) {
+        if (isInsert == null || newValue == null) {
+            return false;
+        }
+        
+        Boolean hasValue = newValue != null &&
+                !'ATTACHMENT'.equalsIgnoreCase(newValue) &&
+                !'VPEXCEPTION'.equalsIgnoreCase(newValue) &&
+                !system.Label.OrderNumberExceptionAllowed.contains(newValue); // US19304
+
+        // if insert then validation is required when order number is supplied,
+        // unless it is one of the "special" values
+        if (isInsert && hasValue) {
+            return true;
+        }
+        
+        // if update then only validate if number changed
+        if (!isInsert && hasValue && oldValue != newValue) {
+            return true;
+        }
+        return false;
+    }
+    //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    public static String formatToPhone(String pTN) {
+        String strRetVal = null;
+        if (pTN!=null){
+            if (pTN.length()==10){
+                strRetVal = '('+pTN.substring(0,3)+') '+pTN.substring(3,6)+'-'+pTN.substring(6,10);
+            }else{
+                strRetVal = pTN; 
+            }
+        }
+        return strRetVal;
+    }
+    //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    public static User getUserByCUID(String pCUID){
+        if(pCUID == null || pCUID.trim().length() <= 0){
+            return null;
+        }
+        List<User> users = null;
+        try{
+            users = [SELECT id, name, Email FROM User WHERE cuid__c = : pCUID];         
+        }catch(QueryException ex){
+            return null;
+        }
+        if(users != null & users.size() == 1){
+            return users[0];    
+        }
+        return null;
+    }
+    
+    //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    public static User getActiveUserByCUID(String pCUID){
+        if(pCUID == null || pCUID.trim().length() <= 0){
+            return null;
+        }
+        List<User> users = null;
+        try{
+            users = [SELECT id, name, Email FROM User WHERE cuid__c = : pCUID and isActive = true];         
+        }catch(QueryException ex){
+            return null;
+        }
+        if(users != null & users.size() == 1){
+            return users[0];    
+        }
+        return null;
+    }
+    
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// Right now it is assumed that if multiples are returned by the query below that we can just use
+// the first one.  UUID is "supposed" to be unique after all :)
+    public static Account getAccountByUUID(String pUUID){
+        if(pUUID == null || pUUID.trim().length() <= 0){
+            return null;
+        }
+        List<Account> accounts = null;
+        try{
+            accounts = [SELECT id, name FROM Account WHERE UUID__c = : pUUID];         
+        }catch(QueryException ex){
+            return null;
+        }
+        if(accounts != null & accounts.size() == 1){
+            return accounts[0];    
+        }
+        return null;
+    }
+    
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    public static Task__c getTaskFromOMSOrderID(String omsOrderId)
+    {
+        Task__c currentTask = null;
+        try {
+            OMS_Order__c currentOrder = [select Order__c from OMS_Order__c
+                             where Id = :omsOrderId];
+            currentTask = [select Id from Task__c 
+                            where Id = :currentOrder.Order__c];         
+        } catch(QueryException ex){
+            return null;
+        }
+        return currentTask; 
+    }   
+        
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    public static List<String> generateUniqueUUIDs(Integer pCount){
+
+        Set<String> mySet = new Set<String>{};
+        
+        if (pCount!=null && pCount>0){
+            boolean bContainsNonUnique = true;
+            While(bContainsNonUnique || mySet.Size()<pCount){
+                Integer iSetSize = mySet.size();
+                for (Integer i=0;i<pCount-iSetSize;i++){
+                    //the set will handle any possible dupes (however unlikely) coming out of the randomUUID method
+                    mySet.add(al.RandomStringUtils.randomUUID());   
+                }
+                List<Account> myStringList = [select UUID__c from Account where UUID__c in :mySet];
+                if (myStringList.size()==0){
+                    bContainsNonUnique = false;
+                }else{
+                    for (Account myAcct:myStringList){
+                        mySet.remove(myAcct.UUID__c);
+                    }
+                }
+            }
+        }
+
+        return new List<String>(mySet);
+    }
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    public static String getObjByID(Id objID){
+    
+        String ObjName;
+        
+        Map<String, Schema.SObjectType> gd = Schema.getGlobalDescribe(); 
+        Map<String,String> keyPrefixMap = new Map<String,String>{};
+        Set<String> keyPrefixSet = gd.keySet();
+        for(String sObj : keyPrefixSet){
+           Schema.DescribeSObjectResult r =  gd.get(sObj).getDescribe();
+           String tempName = r.getName();
+           String tempPrefix = r.getKeyPrefix();
+//         system.debug('Processing Object['+tempName + '] with Prefix ['+ tempPrefix+']');
+           keyPrefixMap.put(tempPrefix,tempName);
+        }
+        
+        String tPrefix = objID;
+        
+        if(tPrefix != null && tPrefix.trim().length() > 2){
+            
+            tPrefix = tPrefix.subString(0,3);
+            if(keyPrefixMap.keySet().contains(tPrefix)){
+                ObjName = keyPrefixMap.get(tPrefix);
+//              system.debug('Id[' + objID + '] is associated to Object of Type: ' + ObjName);
+            }
+        }
+        return ObjName;
+    }
+    
+    ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    public static String generateUniqueUUID(){
+        String strRetVal = null;
+        List<String> myList = null;
+        myList = generateUniqueUUIDs(1);
+        if (myList!=null && myList.size()>0){
+            strRetVal = myList[0];
+        }
+        return strRetVal;
+    }
+    
+    // Get a list of picklist values from an existing object field.
+   public static list<SelectOption> getPicklistValues(SObject obj, String fld) {
+      list<SelectOption> options = new list<SelectOption>();
+      // Get the object type of the SObject.
+      Schema.sObjectType objType = obj.getSObjectType(); 
+      // Describe the SObject using its object type.
+      Schema.DescribeSObjectResult objDescribe = objType.getDescribe();       
+      // Get a map of fields for the SObject
+      map<String, Schema.SObjectField> fieldMap = objDescribe.fields.getMap(); 
+      // Get the list of picklist values for this field.
+      list<Schema.PicklistEntry> values =
+         fieldMap.get(fld).getDescribe().getPickListValues();
+      // Add these values to the selectoption list.
+      for (Schema.PicklistEntry a : values) { 
+         options.add(new SelectOption(a.getLabel(), a.getValue())); 
+      }
+      return options;
+   }
+   public static list<String> parseCommaDelimtedString(String pString){
+     List<String> lRetVal = null;
+     if (pString!=null && pString.length()>0){
+        lRetVal = pString.split(',');
+     }
+     return lRetVal;
+   }
+   
+       public static list<selectOption> selectOptionSortByLabel(list<selectOption>
+                                                            selectOptionsToSort, Boolean addNone) {
+        if(selectOptionsToSort == null || selectOptionsToSort.size() <= 1){
+            return selectOptionsToSort;
+        }
+        List<SelectOption> lessSelectOption = new List<SelectOption>();
+        List<SelectOption> greaterSelectOption = new List<SelectOption>();
+        integer pivot = selectOptionsToSort.size() / 2;
+        
+        //save the pivot and remove it from the selectOption list
+        SelectOption pivotValue = selectOptionsToSort[pivot];
+        selectOptionsToSort.remove(pivot);
+        for(selectOption SO : selectOptionsToSort){
+            if(SO.getLabel() <= pivotValue.getLabel()){
+                lessSelectOption.add(SO);
+            }else if(SO.getLabel() > pivotValue.getLabel()){
+                greaterSelectOption.add(SO);   
+            }
+        }
+        list<selectOption> sortedSelectOptions = new list<selectOption>();
+        if (addNone)
+            sortedSelectOptions.add(new SelectOption('', '--None--'));
+            
+        sortedSelectOptions.addAll(selectOptionSortByLabel(lessSelectOption, false));
+        sortedSelectOptions.add(pivotValue);
+        sortedSelectOptions.addAll(selectOptionSortByLabel(greaterSelectOption, false));
+        return SortedSelectOptions;
+    }
+   
+       public static list<selectOption> selectOptionSortByValue(list<selectOption>
+                                                            selectOptionsToSort){
+        if(selectOptionsToSort == null || selectOptionsToSort.size() <= 1){
+            return selectOptionsToSort;
+        }       
+        List<SelectOption> lessSelectOption = new List<SelectOption>();
+        List<SelectOption> greaterSelectOption = new List<SelectOption>();
+        integer pivot = selectOptionsToSort.size() / 2;
+         
+        //save the pivot and remove it from the selectOption list
+        SelectOption pivotValue = selectOptionsToSort[pivot]; 
+        selectOptionsToSort.remove(pivot);
+        for(selectOption SO : selectOptionsToSort){
+            if(SO.getValue() <= pivotValue.getValue()){
+                lessSelectOption.add(SO);
+            }else if(SO.getValue() > pivotValue.getValue()){
+                greaterSelectOption.add(SO);   
+            }
+        }
+        list<selectOption> SortedSelectOptions = new list<selectOption>(); 
+        SortedSelectOptions.addAll(selectOptionSortByValue(lessSelectOption));
+        SortedSelectOptions.add(pivotValue);
+        SortedSelectOptions.addAll(selectOptionSortByValue(greaterSelectOption));
+        return SortedSelectOptions;
+    }
+
+    public static List<Opportunity> removeSavvis(List<Opportunity> oppList) {
+        if (oppList == null || oppList.size() < 1) {
+            return oppList;
+        }
+        List<Opportunity> myList = new List<Opportunity>();
+        for (Opportunity o : oppList) {
+            if (!system.label.savvis_opp_record_type_ids.contains(o.RecordTypeId)) {
+                myList.add(o);
+            }
+        }
+        return myList;
+    }
+    
+    public static List<Opportunity> removeNonSavvis(List<Opportunity> oppList) {
+        if (oppList == null || oppList.size() < 1) {
+            return oppList;
+        }
+        List<Opportunity> myList = new List<Opportunity>();
+        for (Opportunity o : oppList) {
+            if (system.label.savvis_opp_record_type_ids.contains(o.RecordTypeId)) {
+                myList.add(o);
+            }
+        }
+        return myList;
+    }   
+    
+    public static List<Quote> removeSavvis(List<Quote> quoteList) {
+        if (quoteList == null || quoteList.size() < 1) {
+            return quoteList;
+        }
+        List<Quote> myList = new List<Quote>();
+        for (Quote q : quoteList) {
+            //if (!system.label.savvis_quote_record_type_ids.contains(q.RecordTypeId)) {
+                //myList.add(q);
+            //}
+        }
+        return myList;
+    }
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+      /*
+        Class/method name: ApexUtil/cleanseString_UTF_8 
+        Author/Date: Brett Ballantyne 2/17/2014
+        Release: May 2014
+        Purpose: US2730 - Removes characters outside the range of the UTF-8 character set.
+                          Useful for converting blobs uploaded in a bulk load scenario so you don't get the
+                          "Not a valid UTF-8 String" error message
+     */ 
+    public static String cleanseString_UTF_8(Blob input) {
+        String inCharset = 'UTF-8';
+        Set <String> hexSet = new Set<String> {'80','81','82','83','84','85','86','87','88','89','8a','8b','8c','8d','8e','8f',
+                                               '80','81','82','83','84','85','86','87','88','89','8A','8B','8C','8D','8E','8F',
+                                               '90','91','92','93','94','95','96','97','98','99','9a','9b','9c','9d','9e','9f',
+                                               '90','91','92','93','94','95','96','97','98','99','9A','9B','9C','9D','9E','9F',
+                                               'a0','a1','a2','a3','a4','a5','a6','a7','a8','a9','aa','ab','ac','ad','ae','af',
+                                               'A0','A1','A2','A3','A4','A5','A6','A7','A8','A9','AA','AB','AC','AD','AE','AF',
+                                               'b0','b1','b2','b3','b4','b5','b6','b7','b8','b9','ba','bb','bc','bd','be','bf',
+                                               'B0','B1','B2','B3','B4','B5','B6','B7','B8','B9','BA','BB','BC','BD','BE','BF',
+                                               'c0','c1','c2','c3','c4','c5','c6','c7','c8','c9','ca','cb','cc','cd','ce','cf',
+                                               'C0','C1','C2','C3','C4','C5','C6','C7','C8','C9','CA','CB','CC','CD','CE','CF',
+                                               'd0','d1','d2','d3','d4','d5','d6','d7','d8','d9','da','db','dc','dd','de','df',
+                                               'D0','D1','D2','D3','D4','D5','D6','D7','D8','D9','DA','DB','DC','DD','DE','DF',
+                                               'e0','e1','e2','e3','e4','e5','e6','e7','e8','e9','ea','eb','ec','ed','ee','ef',
+                                               'E0','E1','E2','E3','E4','E5','E6','E7','E8','E9','EA','EB','EC','ED','EE','EF',
+                                               'f0','f1','f2','f3','f4','f5','f6','f7','f8','f9','fa','fb','fc','fd','fe','ff',
+                                               'F0','F1','F2','F3','F4','F5','F6','F7','F8','F9','FA','FB','FC','FD','FE','FF'};
+        String hex = EncodingUtil.convertToHex(input);
+        System.assertEquals(0, hex.length() & 1);
+        final Integer bytesCount = hex.length() >> 1;
+        String[] bytes = new String[bytesCount];
+        String[] hexChar = new String[1];
+        Integer delCount = 0;
+        String retStr = '';
+        for(Integer i = 0; i < bytesCount; ++i) {
+            hexChar[0] = hex.mid(i << 1, 2);
+            if (!hexSet.contains(hexChar[0])) {
+              bytes[i - delCount] =  hex.mid(i << 1, 2);
+            } else {
+                delCount++;
+                bytes.remove(bytes.size() - 1);
+            }
+        }
+        return EncodingUtil.urlDecode('%' + String.join(bytes, '%'), inCharset);
+    }
+    
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+      /*
+        Class/method name: ApexUtil/isStrInDelimitedStr 
+        Author/Date: Brett Ballantyne 9/25/2014
+        Release: October 2014
+        Purpose: US9975 (and other various NGPOM US') - parses delimited string for a match
+     */ 
+    public static Boolean isStrInDelimitedStr(String pStr, String pSearchStr, String pDelimiter) {
+        if (pStr == null || pStr.trim() == '' || pSearchStr == null || pSearchStr.trim() == '' || pDelimiter == null || pDelimiter.trim() == '')
+            return false;
+        String [] regionList = pStr.split(pDelimiter);
+        for (String region : regionList) {
+            if (region != null && region.trim().equalsIgnoreCase(pSearchStr)) {
+                return true;
+            }
+        }
+        return false;   
+    }
+    
+    //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+      /*
+        Class/method name: sendEmailForError 
+        Author/Date: Reg Archer/2/24/2014
+        Release: May 2014?
+        Purpose: US7966 is re-defining where batch jobs send their errors
+     */ 
+     public static void sendEmailForError(String subject, String customErrorMessage, String exceptionMessage, String additionalMessage){
+        //Send emails for error 
+        DateTime messageDateTime = System.now();
+        Messaging.SingleEmailMessage email = new Messaging.SingleEmailMessage();
+        email.setSaveAsActivity(false);
+        email.setTargetObjectId(UserInfo.GetUserId()); 
+        email.setSubject('ERROR: '+ subject);
+        email.setPlainTextBody (
+                                '\n\n :Error message time   -->' + messageDateTime + 
+                                '\n\n :Custom error message -->' + customErrorMessage+
+                                '\n\n :Exception message    -->' + exceptionMessage+ 
+                                '\n\n :Addional info    -->' + additionalMessage 
+                               ) ; 
+        try{                       
+           List<Messaging.SendEmailResult> myEmailRes =  Messaging.sendEmail(new Messaging.SingleEmailMessage[] { email });
+            
+            if (myEmailRes==null){
+                System.debug(logginglevel.warn,'myEmailRes was null');
+            }else{
+                for (Messaging.SendEmailResult myRes:myEmailRes){
+                    System.debug(logginglevel.warn,'Email Result: '+myRes);
+                }
+            }
+            
+        }catch (Exception e) {
+            //retry 1 time if bad email adress in Label.BatchProcessor_OrderSharing_toAddresses
+            If (!(Label.BatchProcessor_OrderSharing_toAddresses == 'STOPEMAIL')){   
+                email.setTargetObjectId(UserInfo.GetUserId()); 
+                Messaging.sendEmail(new Messaging.SingleEmailMessage[] { email });
+            }
+        }
+        
+    }
+}
