@@ -1,0 +1,98 @@
+
+var serialize = function (object) {
+	return JSON.stringify(object);
+}
+
+var deserialize = function (object) {
+	if (object === null) return null;
+	return JSON.parse(object);
+}
+
+var getObjectFromSessionStorage = function (sessionStorageKey) {
+	return deserialize(sessionStorage.getItem(sessionStorageKey));
+}
+
+var CrossTransactionCommunicator = function () {
+	this.newEntry = {};
+	this.entryKey = '';
+	this.primaryTabObjectId = '';
+	this.currentEntryValue = '';
+	this.sessionStorageKey = '';
+	this.onChangeFunction = null;
+};
+
+CrossTransactionCommunicator.prototype.usingPrimaryTabObjectId = function (primaryTabObjectId) {
+	this.primaryTabObjectId = (primaryTabObjectId.length > 15 ? primaryTabObjectId.substring(0, primaryTabObjectId.length - 3) : primaryTabObjectId);
+	return this;
+};
+
+CrossTransactionCommunicator.prototype.setEntry = function (newEntry) {
+	this.newEntry = newEntry;
+	return this;
+};
+
+CrossTransactionCommunicator.prototype.on = function (sessionStorageKey) {
+	var objectFromSessionStorage = getObjectFromSessionStorage(sessionStorageKey);
+	if (objectFromSessionStorage === null) {
+		objectFromSessionStorage = {};
+	}
+	var key = Object.keys(this.newEntry)[0];
+	this.uniqueKey = key + this.primaryTabObjectId;
+	objectFromSessionStorage[this.uniqueKey] = this.newEntry[key];
+	sessionStorage.setItem(sessionStorageKey, serialize(objectFromSessionStorage));
+};
+
+CrossTransactionCommunicator.prototype.getEntry = function (entryKey) {
+	this.entryKey = entryKey;
+	return this;
+};
+
+CrossTransactionCommunicator.prototype.from = function (sessionStorageKey) {
+	this.sessionStorageKey = sessionStorageKey;
+	this.uniqueKey = this.entryKey + this.primaryTabObjectId;
+	var objectFromSessionStorage = getObjectFromSessionStorage(sessionStorageKey);
+	if (objectFromSessionStorage !== null){
+		this.currentEntryValue = objectFromSessionStorage[this.uniqueKey];
+		return this.currentEntryValue;
+	}	
+	return null;
+};
+
+CrossTransactionCommunicator.prototype.onRetrievedEntryChange = function (onChangeFunction) {
+	//save a reference to the onChangeFunction so you can 
+	//remove the event listener at a future time
+	this.onChangeFunction = function (e) {
+		//if sessionStorage (not localStorage) changed and the key in sessionStorage that changed
+		//is the same as the name of the key you retrieved from sessionStorage (using the "from" function)
+		if (e.storageArea === sessionStorage && e.key === self.sessionStorageKey) {
+			//grab the desired entry from the new value of the key you previously retrieved
+			var newEntryValue = deserialize(e.newValue)[self.uniqueKey];
+			//if the entry value you were tracking was the one that was actually updated
+			if (self.currentEntryValue !== newEntryValue) {
+				self.currentEntryValue = newEntryValue;
+				//pass the new entry value to the on change function
+				onChangeFunction(newEntryValue);
+			}
+		}
+	};
+	var self = this;
+	window.addEventListener('storage', this.onChangeFunction);
+};
+
+CrossTransactionCommunicator.prototype.stopListeningToRetrievedEntryChanges = function () {
+	window.removeEventListener('storage', this.onChangeFunction);
+};
+CrossTransactionCommunicator.prototype.clearStorageEntries = function(sessionStorageKey){
+	var objectFromSessionStorage = getObjectFromSessionStorage(sessionStorageKey);
+	if (objectFromSessionStorage === null) {
+		objectFromSessionStorage = {};
+		return;
+	}
+	var storageObjectKeys = Object.keys(objectFromSessionStorage);
+    storageObjectKeys.forEach(function(val){
+		if(val.includes(primaryTabObjectId))
+			delete objectFromSessionStorage[val];
+	});
+	sessionStorage.setItem(sessionStorageKey, serialize(objectFromSessionStorage));
+	
+}
